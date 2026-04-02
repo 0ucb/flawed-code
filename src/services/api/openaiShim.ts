@@ -21,6 +21,7 @@
  *   OPENAI_MODEL                     — optional; use github:copilot or openai/gpt-4.1 style IDs
  */
 
+import { APIError } from '@anthropic-ai/sdk'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { hydrateGithubModelsTokenFromSecureStorage } from '../../utils/githubModelsCredentials.js'
 import {
@@ -33,6 +34,7 @@ import {
   type ShimCreateParams,
 } from './codexShim.js'
 import {
+  isLocalProviderUrl,
   resolveCodexApiCredentials,
   resolveProviderRequest,
 } from './providerConfig.js'
@@ -213,7 +215,10 @@ function convertMessages(
 
         const assistantMsg: OpenAIMessage = {
           role: 'assistant',
-          content: convertContentBlocks(textContent) as string,
+          content: (() => {
+            const c = convertContentBlocks(textContent)
+            return typeof c === 'string' ? c : Array.isArray(c) ? c.map((p: { text?: string }) => p.text ?? '').join('') : ''
+          })(),
         }
 
         if (toolUses.length > 0) {
@@ -242,7 +247,10 @@ function convertMessages(
       } else {
         result.push({
           role: 'assistant',
-          content: convertContentBlocks(content) as string,
+          content: (() => {
+            const c = convertContentBlocks(content)
+            return typeof c === 'string' ? c : Array.isArray(c) ? c.map((p: { text?: string }) => p.text ?? '').join('') : ''
+          })(),
         })
       }
     }
@@ -617,7 +625,8 @@ async function* openaiStreamToAnthropic(
       if (
         !hasEmittedFinalUsage &&
         chunkUsage &&
-        (chunk.choices?.length ?? 0) === 0
+        (chunk.choices?.length ?? 0) === 0 &&
+        lastStopReason !== null
       ) {
         yield {
           type: 'message_delta',
@@ -666,9 +675,12 @@ class OpenAIShimMessages {
   ) {
     const self = this
 
+    let httpResponse: Response | undefined
+
     const promise = (async () => {
       const request = resolveProviderRequest({ model: params.model })
       const response = await self._doRequest(request, params, options)
+      httpResponse = response
 
       if (params.stream) {
         return new OpenAIShimStream(
@@ -695,8 +707,9 @@ class OpenAIShimMessages {
           const data = await promise
           return {
             data,
-            response: new Response(),
-            request_id: makeMessageId(),
+            response: httpResponse ?? new Response(),
+            request_id:
+              httpResponse?.headers.get('x-request-id') ?? makeMessageId(),
           }
         }
 
@@ -774,7 +787,7 @@ class OpenAIShimMessages {
       body.max_completion_tokens = maxCompletionTokensValue
     }
 
-    if (params.stream) {
+    if (params.stream && !isLocalProviderUrl(request.baseUrl)) {
       body.stream_options = { include_usage: true }
     }
 
@@ -890,12 +903,20 @@ class OpenAIShimMessages {
       const errorBody = await response.text().catch(() => 'unknown error')
       const rateHint =
         isGithub && response.status === 429 ? formatRetryAfterHint(response) : ''
-      throw new Error(
+      let errorResponse: object | undefined
+      try { errorResponse = JSON.parse(errorBody) } catch { /* raw text */ }
+      throw APIError.generate(
+        response.status,
+        errorResponse,
         `OpenAI API error ${response.status}: ${errorBody}${rateHint}`,
+        response.headers as unknown as Record<string, string>,
       )
     }
 
-    throw new Error('OpenAI shim: request loop exited unexpectedly')
+    throw APIError.generate(
+      500, undefined, 'OpenAI shim: request loop exited unexpectedly',
+      {} as Record<string, string>,
+    )
   }
 
   private _convertNonStreamingResponse(
