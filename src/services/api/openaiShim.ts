@@ -479,6 +479,10 @@ function convertChunkUsage(
   }
 }
 
+const JSON_REPAIR_SUFFIXES = [
+  '}', '"}', ']}', '"]}', '}}', '"}}', ']}}', '"]}}', '"]}]}', '}]}'
+]
+
 function repairPossiblyTruncatedObjectJson(raw: string): string | null {
   try {
     const parsed = JSON.parse(raw)
@@ -486,19 +490,7 @@ function repairPossiblyTruncatedObjectJson(raw: string): string | null {
       ? raw
       : null
   } catch {
-    const combinations = [
-      '}',
-      '"}',
-      ']}',
-      '"]}',
-      '}}',
-      '"}}',
-      ']}}',
-      '"]}}',
-      '"]}]}',
-      '}]}',
-    ]
-    for (const combo of combinations) {
+    for (const combo of JSON_REPAIR_SUFFIXES) {
       try {
         const repaired = raw + combo
         const parsed = JSON.parse(repaired)
@@ -700,18 +692,16 @@ async function* openaiStreamToAnthropic(
           // Close active tool calls
           for (const [, tc] of activeToolCalls) {
             if (tc.normalizeAtStop) {
-              let partialJson = tc.jsonBuffer
-              if (choice.finish_reason === 'tool_calls') {
-                const repairedStructuredJson = repairPossiblyTruncatedObjectJson(
-                  tc.jsonBuffer,
+              const repairedStructuredJson = repairPossiblyTruncatedObjectJson(
+                tc.jsonBuffer,
+              )
+              let partialJson: string
+              if (repairedStructuredJson) {
+                partialJson = repairedStructuredJson
+              } else {
+                partialJson = JSON.stringify(
+                  normalizeToolArguments(tc.name, tc.jsonBuffer),
                 )
-                if (repairedStructuredJson) {
-                  partialJson = repairedStructuredJson
-                } else {
-                  partialJson = JSON.stringify(
-                    normalizeToolArguments(tc.name, tc.jsonBuffer),
-                  )
-                }
               }
 
               yield {
@@ -732,10 +722,7 @@ async function* openaiStreamToAnthropic(
                 JSON.parse(tc.jsonBuffer)
               } catch {
                 const str = tc.jsonBuffer.trimEnd()
-                const combinations = [
-                  '}', '"}', ']}', '"]}', '}}', '"}}', ']}}', '"]}}', '"]}]}', '}]}'
-                ]
-                for (const combo of combinations) {
+                for (const combo of JSON_REPAIR_SUFFIXES) {
                   try {
                     JSON.parse(str + combo)
                     suffixToAdd = combo

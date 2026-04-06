@@ -1420,7 +1420,7 @@ test('does not normalize incomplete streamed Bash commands when finish_reason is
     .map(event => (event.delta as Record<string, unknown>).partial_json)
     .join('')
 
-  expect(streamedInput).toBe('rg --fi')
+  expect(streamedInput).toBe('{"command":"rg --fi"}')
 })
 
 test('does not repair truncated Bash objects that do not contain command', async () => {

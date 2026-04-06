@@ -1,5 +1,10 @@
 const STRING_ARGUMENT_TOOL_FIELDS: Record<string, string> = {
   Bash: 'command',
+  Read: 'file_path',
+  Write: 'file_path',
+  Edit: 'file_path',
+  Glob: 'pattern',
+  Grep: 'pattern',
 }
 
 function isBlankString(value: string): boolean {
@@ -7,7 +12,10 @@ function isBlankString(value: string): boolean {
 }
 
 function isLikelyStructuredObjectLiteral(value: string): boolean {
-  return /^\s*\{\s*"[^"\\]+"\s*:/.test(value)
+  // Match object-like patterns with key-value syntax:
+  // {"key":, {key:, {'key':, { "key" :, etc.
+  // But NOT bash compound commands like { pwd; } or { echo hi; }
+  return /^\s*\{\s*['"]?\w+['"]?\s*:/.test(value)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -52,10 +60,8 @@ export function normalizeToolArguments(
     }
     return parsed
   } catch {
-    if (toolName === 'Bash') {
-      if (isBlankString(rawArguments) || isLikelyStructuredObjectLiteral(rawArguments)) {
-        return { raw: rawArguments }
-      }
+    if (isBlankString(rawArguments) || isLikelyStructuredObjectLiteral(rawArguments)) {
+      return { raw: rawArguments }
     }
     return (
       wrapPlainStringToolArguments(toolName, rawArguments) ?? { raw: rawArguments }
