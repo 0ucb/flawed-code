@@ -292,6 +292,7 @@ export const inputSchema = lazySchema(() =>
   z.object({
     skill: z
       .string()
+      .optional()
       .describe('The skill name. E.g., "commit", "review-pr", or "pdf"'),
     args: z.string().optional().describe('Optional arguments for the skill'),
   }),
@@ -352,6 +353,16 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
   toAutoClassifierInput: ({ skill }) => skill ?? '',
 
   async validateInput({ skill }, context): Promise<ValidationResult> {
+    if (!skill || typeof skill !== 'string') {
+      return {
+        result: false,
+        message:
+          'Missing skill name. Pass the slash command name as the skill parameter ' +
+          '(e.g., skill: "commit" for /commit, skill: "review-pr" for /review-pr).',
+        errorCode: 1,
+      }
+    }
+
     // Skills are just skill names, no arguments
     const trimmed = skill.trim()
     if (!trimmed) {
@@ -434,7 +445,7 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     context,
   ): Promise<PermissionDecision> {
     // Skills are just skill names, no arguments
-    const trimmed = skill.trim()
+    const trimmed = skill ?? ''
 
     // Remove leading slash if present (for compatibility)
     const commandName = trimmed.startsWith('/') ? trimmed.substring(1) : trimmed
@@ -592,7 +603,7 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
     // - Skill is a prompt-based skill
 
     // Skills are just names, with optional arguments
-    const trimmed = skill.trim()
+    const trimmed = skill ?? ''
 
     // Remove leading slash if present (for compatibility)
     const commandName = trimmed.startsWith('/') ? trimmed.substring(1) : trimmed
