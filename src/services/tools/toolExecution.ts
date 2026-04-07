@@ -613,6 +613,15 @@ export function getSchemaValidationErrorOverride(
   return null
 }
 
+export function getSchemaValidationToolUseResult(
+  tool: Tool,
+  input: unknown,
+  fallbackMessage?: string,
+): string {
+  const override = getSchemaValidationErrorOverride(tool, input)
+  return `InputValidationError: ${override ?? fallbackMessage ?? ''}`
+}
+
 async function checkPermissionsAndCallTool(
   tool: Tool,
   toolUseID: string,
@@ -631,9 +640,9 @@ async function checkPermissionsAndCallTool(
   // Validate input types with zod (surprisingly, the model is not great at generating valid input)
   const parsedInput = tool.inputSchema.safeParse(input)
   if (!parsedInput.success) {
+    const fallbackErrorContent = formatZodValidationError(tool.name, parsedInput.error)
     let errorContent =
-      getSchemaValidationErrorOverride(tool, input) ??
-      formatZodValidationError(tool.name, parsedInput.error)
+      getSchemaValidationErrorOverride(tool, input) ?? fallbackErrorContent
 
     const schemaHint = buildSchemaNotSentHint(
       tool,
@@ -691,7 +700,11 @@ async function checkPermissionsAndCallTool(
               tool_use_id: toolUseID,
             },
           ],
-          toolUseResult: `InputValidationError: ${parsedInput.error.message}`,
+          toolUseResult: getSchemaValidationToolUseResult(
+            tool,
+            input,
+            parsedInput.error.message,
+          ),
           sourceToolAssistantUUID: assistantMessage.uuid,
         }),
       },
