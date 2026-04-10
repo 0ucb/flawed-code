@@ -113,7 +113,10 @@ export const getGitStatus = memoize(async (): Promise<string | null> => {
 
 export const getRepoMapContext = memoize(
   async (): Promise<string | null> => {
-    if (!feature('REPO_MAP')) return null
+    // Enable via compile-time feature flag OR runtime env var.
+    // The runtime env var lets users enable auto-injection without rebuilding.
+    const runtimeEnabled = isEnvTruthy(process.env.REPO_MAP)
+    if (!feature('REPO_MAP') && !runtimeEnabled) return null
     if (isBareMode()) return null
     if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) return null
 
