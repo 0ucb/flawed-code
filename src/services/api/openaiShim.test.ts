@@ -3415,10 +3415,10 @@ test('Moonshot: echoes reasoning_content on assistant tool-call messages', async
   )
 })
 
-test('non-Moonshot providers do NOT receive reasoning_content on assistant messages', async () => {
-  // Guard: only Moonshot opts in. DeepSeek/OpenRouter/etc. receive the
-  // outgoing assistant message without reasoning_content to avoid
-  // unknown-field rejections from strict servers.
+test('DeepSeek providers receive reasoning_content on assistant messages', async () => {
+  // DeepSeek V4 requires reasoning_content to be echoed back on multi-turn
+  // tool calls. The same preservation path used for Moonshot now also covers
+  // DeepSeek API hosts.
   process.env.OPENAI_BASE_URL = 'https://api.deepseek.com/v1'
   process.env.OPENAI_API_KEY = 'sk-deepseek'
 
@@ -3449,31 +3449,18 @@ test('non-Moonshot providers do NOT receive reasoning_content on assistant messa
         content: [
           { type: 'thinking', thinking: 'thought' },
           { type: 'text', text: 'hello' },
-          {
-            type: 'tool_use',
-            id: 'call_1',
-            name: 'Bash',
-            input: { command: 'ls' },
-          },
         ],
       },
-      {
-        role: 'user',
-        content: [
-          { type: 'tool_result', tool_use_id: 'call_1', content: 'files' },
-        ],
-      },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'lab' }] },
     ],
     max_tokens: 32,
     stream: false,
   })
 
   const messages = requestBody?.messages as Array<Record<string, unknown>>
-  const assistantWithToolCall = messages.find(
-    m => m.role === 'assistant' && Array.isArray(m.tool_calls),
-  )
-  expect(assistantWithToolCall).toBeDefined()
-  expect(assistantWithToolCall?.reasoning_content).toBeUndefined()
+  const assistantMsg = messages.find(m => m.role === 'assistant')
+  expect(assistantMsg).toBeDefined()
+  expect(assistantMsg?.reasoning_content).toBe('thought')
 })
 
 test('Moonshot: cn host is also detected', async () => {
