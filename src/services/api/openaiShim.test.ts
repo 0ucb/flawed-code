@@ -3449,18 +3449,92 @@ test('DeepSeek providers receive reasoning_content on assistant messages', async
         content: [
           { type: 'thinking', thinking: 'thought' },
           { type: 'text', text: 'hello' },
+          {
+            type: 'tool_use',
+            id: 'call_1',
+            name: 'Bash',
+            input: { command: 'ls' },
+          },
         ],
       },
-      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'lab' }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'call_1', content: 'files' },
+        ],
+      },
     ],
     max_tokens: 32,
     stream: false,
   })
 
   const messages = requestBody?.messages as Array<Record<string, unknown>>
-  const assistantMsg = messages.find(m => m.role === 'assistant')
-  expect(assistantMsg).toBeDefined()
-  expect(assistantMsg?.reasoning_content).toBe('thought')
+  const assistantWithToolCall = messages.find(
+    m => m.role === 'assistant' && Array.isArray(m.tool_calls),
+  )
+  expect(assistantWithToolCall).toBeDefined()
+  expect(assistantWithToolCall?.reasoning_content).toBe('thought')
+})
+
+test('DeepSeek: tool call without thinking block still gets empty reasoning_content', async () => {
+  // DeepSeek V4 may emit a tool_call without a preceding non-empty
+  // reasoning_content delta on trivial follow-up tool calls. The
+  // reasoning_content field must still be present (even if empty) to
+  // satisfy the echo-back contract.
+  process.env.OPENAI_BASE_URL = 'https://api.deepseek.com/v1'
+  process.env.OPENAI_API_KEY = 'sk-deepseek'
+
+  let requestBody: Record<string, unknown> | undefined
+  globalThis.fetch = (async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body))
+    return new Response(
+      JSON.stringify({
+        id: 'chatcmpl-2',
+        model: 'deepseek-chat',
+        choices: [
+          { message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' },
+        ],
+        usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+      }),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+  }) as FetchType
+
+  const client = createOpenAIShimClient({}) as OpenAIShimClient
+  await client.beta.messages.create({
+    model: 'deepseek-chat',
+    system: 'test',
+    messages: [
+      { role: 'user', content: 'check the file' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '' },
+          {
+            type: 'tool_use',
+            id: 'call_2',
+            name: 'Read',
+            input: { file_path: '/tmp/f' },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'call_2', content: 'data' },
+        ],
+      },
+    ],
+    max_tokens: 32,
+    stream: false,
+  })
+
+  const messages = requestBody?.messages as Array<Record<string, unknown>>
+  const assistantWithToolCall = messages.find(
+    m => m.role === 'assistant' && Array.isArray(m.tool_calls),
+  )
+  expect(assistantWithToolCall).toBeDefined()
+  expect(assistantWithToolCall?.reasoning_content).toBe('')
 })
 
 test('Moonshot: cn host is also detected', async () => {

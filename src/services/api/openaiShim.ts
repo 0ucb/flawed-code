@@ -519,11 +519,23 @@ function convertMessages(
         // `reasoning_content` field on the outgoing OpenAI-shaped message.
         // Gated per-provider because other endpoints either ignore the field
         // (harmless) or strict-reject unknown fields (harmful).
-        if (preserveReasoningContent) {
-          const thinkingText = (thinkingBlock as { thinking?: string } | undefined)?.thinking
-          if (typeof thinkingText === 'string' && thinkingText.trim().length > 0) {
-            assistantMsg.reasoning_content = thinkingText
-          }
+        //
+        // DeepSeek V4 likewise requires reasoning_content on every
+        // assistant tool-call message. The model may produce a tool_call
+        // without a preceding non-empty reasoning_content delta (e.g. on a
+        // trivial follow-up tool call), in which case no thinking block is
+        // emitted. For providers that require reasoning continuity, always
+        // set reasoning_content when tool_calls are present so the echo-back
+        // contract is satisfied even when the model produced no reasoning.
+        const thinkingText = (thinkingBlock as { thinking?: string } | undefined)?.thinking
+        if (
+          preserveReasoningContent &&
+          (typeof thinkingText === 'string' || toolUses.length > 0)
+        ) {
+          assistantMsg.reasoning_content =
+            typeof thinkingText === 'string' && thinkingText.trim().length > 0
+              ? thinkingText
+              : ''
         }
 
         if (toolUses.length > 0) {
