@@ -89,6 +89,10 @@ const MOONSHOT_API_HOSTS = new Set([
   'api.moonshot.cn',
 ])
 
+const DEEPSEEK_API_HOSTS = new Set([
+  'api.deepseek.com',
+])
+
 const COPILOT_HEADERS: Record<string, string> = {
   'User-Agent': 'GitHubCopilotChat/0.26.7',
   'Editor-Version': 'vscode/1.99.3',
@@ -157,6 +161,15 @@ function isMoonshotBaseUrl(baseUrl: string | undefined): boolean {
   if (!baseUrl) return false
   try {
     return MOONSHOT_API_HOSTS.has(new URL(baseUrl).hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+function isDeepseekBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false
+  try {
+    return DEEPSEEK_API_HOSTS.has(new URL(baseUrl).hostname.toLowerCase())
   } catch {
     return false
   }
@@ -670,6 +683,17 @@ function convertMessages(
           ...(lastAfterPossibleInjection.tool_calls ?? []),
           ...msg.tool_calls,
         ]
+      }
+
+      // Merge reasoning_content for DeepSeek multi-turn compatibility.
+      // DeepSeek requires reasoning_content to be passed back on every
+      // subsequent request. When the coalescing pass merges consecutive
+      // assistant messages, the reasoning payload must be merged as well
+      // so the model sees the full chain-of-thought history it expects.
+      if (msg.reasoning_content && lastAfterPossibleInjection.reasoning_content) {
+        lastAfterPossibleInjection.reasoning_content += '\n' + msg.reasoning_content
+      } else if (msg.reasoning_content) {
+        lastAfterPossibleInjection.reasoning_content = msg.reasoning_content
       }
     } else {
       coalesced.push(msg)
@@ -1489,7 +1513,11 @@ class OpenAIShimMessages {
       // Moonshot requires every assistant tool-call message to carry
       // reasoning_content when its thinking feature is active. Echo it back
       // from the thinking block we captured on the inbound response.
-      preserveReasoningContent: isMoonshotBaseUrl(request.baseUrl),
+      // DeepSeek likewise requires reasoning_content on every subsequent
+      // request of a multi-turn conversation when multi-turn tool calls are
+      // in use; omitting it and the API returns 400.
+      preserveReasoningContent:
+        isMoonshotBaseUrl(request.baseUrl) || isDeepseekBaseUrl(request.baseUrl),
     })
 
     const body: Record<string, unknown> = {
