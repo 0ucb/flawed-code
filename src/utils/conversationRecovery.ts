@@ -179,6 +179,24 @@ export type DeserializeResult = {
 }
 
 /**
+ * Providers (DeepSeek V4, Moonshot) that require reasoning_content to be
+ * echoed back on every assistant message with tool_calls. These providers
+ * need the original thinking block content preserved so it can be extracted
+ * by openaiShim's convertMessages() and set as reasoning_content on the
+ * outgoing OpenAI-format message.
+ */
+function isReasoningEchoBackProvider(): boolean {
+  const baseUrl = (
+    process.env.OPENAI_BASE_URL ?? ''
+  ).toLowerCase()
+  return (
+    baseUrl.includes('deepseek.com') ||
+    baseUrl.includes('moonshot.ai') ||
+    baseUrl.includes('moonshot.cn')
+  )
+}
+
+/**
  * Remove thinking/redacted_thinking content blocks from assistant messages.
  * Messages that become empty after stripping are removed entirely.
  */
@@ -250,9 +268,16 @@ export function deserializeMessagesWithInterruptDetection(
     // Strip thinking/redacted_thinking content blocks from assistant messages
     // when resuming against a 3P provider. These Anthropic-specific blocks cause
     // 400 errors or context corruption on OpenAI-compatible providers (issue #248 finding 5).
+    //
+    // EXCEPTION: DeepSeek and Moonshot require reasoning_content to be echoed
+    // back on every assistant message with tool_calls (the conversion in
+    // openaiShim.ts's convertMessages reads the thinking block to populate
+    // reasoning_content). Stripping the thinking block would lose the original
+    // reasoning text, making the echo-back contract impossible to satisfy.
     const provider = getAPIProvider()
     const isThirdPartyProvider = provider !== 'firstParty' && provider !== 'bedrock' && provider !== 'vertex' && provider !== 'foundry'
-    const thinkingStripped = isThirdPartyProvider
+    const needsReasoningEchoBack = isReasoningEchoBackProvider()
+    const thinkingStripped = isThirdPartyProvider && !needsReasoningEchoBack
       ? stripThinkingBlocks(filteredThinking)
       : filteredThinking
 
