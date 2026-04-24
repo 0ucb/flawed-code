@@ -1532,6 +1532,20 @@ class OpenAIShimMessages {
         isMoonshotBaseUrl(request.baseUrl) || isDeepseekBaseUrl(request.baseUrl),
     })
 
+    // Defensive: ensure every assistant message with tool_calls carries
+    // reasoning_content for providers that require the echo-back contract.
+    // convertMessages covers the known paths, but interleaved retries,
+    // error recovery, and prefill injection can produce assistant tool-call
+    // messages that arrive via different code paths with missing
+    // reasoning_content. A post-processing sweep guarantees conformance.
+    if (isDeepseekBaseUrl(request.baseUrl) || isMoonshotBaseUrl(request.baseUrl)) {
+      for (const msg of openaiMessages) {
+        if (msg.role === 'assistant' && msg.tool_calls?.length && !('reasoning_content' in msg)) {
+          msg.reasoning_content = ''
+        }
+      }
+    }
+
     const body: Record<string, unknown> = {
       model: request.resolvedModel,
       messages: openaiMessages,

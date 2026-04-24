@@ -3448,7 +3448,6 @@ test('DeepSeek providers receive reasoning_content on assistant messages', async
         role: 'assistant',
         content: [
           { type: 'thinking', thinking: 'thought' },
-          { type: 'text', text: 'hello' },
           {
             type: 'tool_use',
             id: 'call_1',
