@@ -93,8 +93,6 @@ const DEEPSEEK_API_HOSTS = new Set([
   'api.deepseek.com',
 ])
 
-let dsMoonshotLogged = false
-
 const COPILOT_HEADERS: Record<string, string> = {
   'User-Agent': 'GitHubCopilotChat/0.26.7',
   'Editor-Version': 'vscode/1.99.3',
@@ -1517,19 +1515,6 @@ class OpenAIShimMessages {
     params: ShimCreateParams,
     options?: { signal?: AbortSignal; headers?: Record<string, string> },
   ): Promise<Response> {
-    // One-time diagnostic: verify DeepSeek/Moonshot detection works
-    {
-      const isDs = isDeepseekBaseUrl(request.baseUrl)
-      const isMs = isMoonshotBaseUrl(request.baseUrl)
-      if (!dsMoonshotLogged && (isDs || isMs)) {
-        logForDebugging(
-          `[DeepSeekDiag] detection: baseUrl=${(request.baseUrl ?? '').slice(0, 80)} isDeepseek=${isDs} isMoonshot=${isMs} model=${request.resolvedModel}`,
-          { level: 'error' },
-        )
-      }
-      dsMoonshotLogged = true
-    }
-
     const compressedMessages = compressToolHistory(
       params.messages as Array<{
         role: string
@@ -1556,33 +1541,13 @@ class OpenAIShimMessages {
     // messages that arrive via different code paths with missing
     // reasoning_content. A post-processing sweep guarantees conformance.
     if (isDeepseekBaseUrl(request.baseUrl) || isMoonshotBaseUrl(request.baseUrl)) {
-      // Diagnostic: count assistant messages and whether they have
-      // reasoning_content. Every assistant message in a tool-call
-      // conversation must carry it.
-      let totalAsst = 0
-      let hadReasoning = 0
-      let missingReasoning = 0
       for (const msg of openaiMessages) {
-        if (msg.role !== 'assistant') continue
-        totalAsst++
-        if (msg.reasoning_content === undefined || msg.reasoning_content === null) {
+        if (
+          msg.role === 'assistant' &&
+          (msg.reasoning_content === undefined || msg.reasoning_content === null)
+        ) {
           msg.reasoning_content = ''
-          missingReasoning++
-        } else {
-          hadReasoning++
         }
-      }
-      if (totalAsst > 0) {
-        logForDebugging(
-          `[DeepSeekSweep] assistants=${totalAsst} hadRC=${hadReasoning} missingRC=${missingReasoning} messages=${openaiMessages.length} baseUrl=${(request.baseUrl ?? '').slice(0, 60)}`,
-          { level: 'error' },
-        )
-      }
-      if (missingReasoning > 0) {
-        logForDebugging(
-          `[OpenAIShim] sweep: injected missing reasoning_content on ${missingReasoning} message(s)`,
-          { level: 'warn' },
-        )
       }
     }
 
