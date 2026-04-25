@@ -5,7 +5,7 @@ import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Ansi, Text } from '../../ink.js';
 import { createHyperlink } from '../../utils/hyperlink.js';
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js';
-import { renderTruncatedContent } from '../../utils/terminal.js';
+import { renderTruncatedContent, sanitizeBinaryOutput } from '../../utils/terminal.js';
 import { MessageResponse } from '../MessageResponse.js';
 import { InVirtualListContext } from '../messageActions.js';
 import { useExpandShellOutput } from './ExpandShellOutputContext.js';
@@ -63,6 +63,7 @@ export function OutputLine(t0) {
   if ($[0] !== columns || $[1] !== content || $[2] !== inVirtualList || $[3] !== linkifyUrls || $[4] !== shouldShowFull) {
     bb0: {
       let formatted = tryJsonFormatContent(content);
+      formatted = sanitizeBinaryOutput(formatted);
       if (linkifyUrls) {
         formatted = linkifyUrlsInText(formatted);
       }

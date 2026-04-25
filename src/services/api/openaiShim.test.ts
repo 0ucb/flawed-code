@@ -449,6 +449,118 @@ test('uses max_tokens instead of max_completion_tokens for local providers', asy
   })
 })
 
+test('sends stream_options for local providers in streaming mode', async () => {
+  process.env.OPENAI_BASE_URL = 'http://localhost:11434/v1'
+
+  globalThis.fetch = (async (_input, init) => {
+    const body = JSON.parse(String(init?.body))
+    expect(body.stream).toBe(true)
+    expect(body.stream_options).toEqual({ include_usage: true })
+
+    const chunks = [
+      'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"qwen3.6","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}\n\n',
+      'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"qwen3.6","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}\n\n',
+      'data: [DONE]\n\n',
+    ]
+
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+          for (const chunk of chunks) {
+            controller.enqueue(encoder.encode(chunk))
+          }
+          controller.close()
+        },
+      }),
+      {
+        headers: { 'Content-Type': 'text/event-stream' },
+      },
+    )
+  }) as FetchType
+
+  const client = createOpenAIShimClient({}) as OpenAIShimClient
+
+  const result = await client.beta.messages
+    .create({
+      model: 'qwen3.6',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 64,
+      stream: true,
+    })
+    .withResponse()
+
+  const events: Array<Record<string, unknown>> = []
+  for await (const event of result.data) {
+    events.push(event)
+  }
+
+  const usageEvent = events.find(
+    event => event.type === 'message_delta' && typeof event.usage === 'object' && event.usage !== null,
+  ) as { usage?: { input_tokens?: number; output_tokens?: number } } | undefined
+  expect(usageEvent).toBeDefined()
+  expect(usageEvent?.usage?.input_tokens).toBe(5)
+  expect(usageEvent?.usage?.output_tokens).toBe(1)
+})
+
+test('retries without stream_options when server rejects it', async () => {
+  process.env.OPENAI_BASE_URL = 'http://localhost:11434/v1'
+
+  let callCount = 0
+  globalThis.fetch = (async (_input, init) => {
+    callCount++
+    const body = JSON.parse(String(init?.body))
+
+    if (callCount === 1) {
+      expect(body.stream).toBe(true)
+      expect(body.stream_options).toEqual({ include_usage: true })
+      return new Response(
+        JSON.stringify({ error: { message: 'Unknown parameter: stream_options' } }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+
+    expect(body.stream).toBe(true)
+    expect(body.stream_options).toBeUndefined()
+    const chunks = [
+      'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"llama3.1:8b","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}\n\n',
+      'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"llama3.1:8b","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}\n\n',
+      'data: [DONE]\n\n',
+    ]
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+          for (const chunk of chunks) {
+            controller.enqueue(encoder.encode(chunk))
+          }
+          controller.close()
+        },
+      }),
+      { headers: { 'Content-Type': 'text/event-stream' } },
+    )
+  }) as FetchType
+
+  const client = createOpenAIShimClient({}) as OpenAIShimClient
+
+  const result = await client.beta.messages
+    .create({
+      model: 'llama3.1:8b',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 64,
+      stream: true,
+    })
+    .withResponse()
+
+  const events: Array<Record<string, unknown>> = []
+  for await (const event of result.data) {
+    events.push(event)
+  }
+
+  expect(callCount).toBe(2)
+  expect(events.some(e => e.type === 'content_block_delta')).toBe(true)
+})
+
 test('keeps max_completion_tokens for non-local non-github providers', async () => {
   process.env.OPENAI_BASE_URL = 'https://api.openai.com/v1'
 

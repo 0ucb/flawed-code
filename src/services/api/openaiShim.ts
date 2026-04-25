@@ -175,6 +175,11 @@ function isDeepseekBaseUrl(baseUrl: string | undefined): boolean {
   }
 }
 
+function isQwenModel(model: string | undefined): boolean {
+  if (!model) return false
+  return /qwen/i.test(model)
+}
+
 function formatRetryAfterHint(response: Response): string {
   const ra = response.headers.get('retry-after')
   return ra ? ` (Retry-After: ${ra})` : ''
@@ -1530,8 +1535,12 @@ class OpenAIShimMessages {
       // DeepSeek likewise requires reasoning_content on every subsequent
       // request of a multi-turn conversation when multi-turn tool calls are
       // in use; omitting it and the API returns 400.
+      // Qwen3.6 preserves/leverages thinking traces from historical messages
+      // via preserve_thinking; echoing reasoning_content mirrors that intent.
       preserveReasoningContent:
-        isMoonshotBaseUrl(request.baseUrl) || isDeepseekBaseUrl(request.baseUrl),
+        isMoonshotBaseUrl(request.baseUrl) ||
+        isDeepseekBaseUrl(request.baseUrl) ||
+        isQwenModel(request.resolvedModel),
     })
 
     // Defensive: ensure every assistant message with tool_calls carries
@@ -1573,7 +1582,7 @@ class OpenAIShimMessages {
       body.max_completion_tokens = maxCompletionTokensValue
     }
 
-    if (params.stream && !isLocalProviderUrl(request.baseUrl)) {
+    if (params.stream) {
       body.stream_options = { include_usage: true }
     }
 
@@ -1587,6 +1596,7 @@ class OpenAIShimMessages {
 
     const isMoonshot = isMoonshotBaseUrl(request.baseUrl)
     const isDeepseek = isDeepseekBaseUrl(request.baseUrl)
+    const isQwen = isQwenModel(request.resolvedModel)
 
     if ((isGithub || isMistral || isLocal || isMoonshot) && body.max_completion_tokens !== undefined) {
       body.max_tokens = body.max_completion_tokens
@@ -1608,6 +1618,12 @@ class OpenAIShimMessages {
     if (!isDeepseek) {
       if (params.temperature !== undefined) body.temperature = params.temperature
       if (params.top_p !== undefined) body.top_p = params.top_p
+    }
+
+    // Qwen3.6 recommended sampling: presence_penalty=1.5 reduces repetitions.
+    // This is a standard OpenAI parameter that most providers ignore if unsupported.
+    if (isQwen) {
+      body.presence_penalty = 1.5
     }
 
     if (params.tools && params.tools.length > 0) {
@@ -1643,6 +1659,15 @@ class OpenAIShimMessages {
     // request. Pass the thinking toggle for all DeepSeek API hosts.
     if (isDeepseek) {
       body.extra_body = { thinking: { type: 'enabled' } }
+    }
+
+    if (isQwen) {
+      const qwenExtra = (body.extra_body as Record<string, unknown>) || {}
+      qwenExtra.top_k = 20
+      qwenExtra.chat_template_kwargs = {
+        enable_thinking: true,
+      }
+      body.extra_body = qwenExtra
     }
 
     const headers: Record<string, string> = {
@@ -1912,6 +1937,18 @@ class OpenAIShimMessages {
       // Read body exactly once here — Response body is a stream that can only
       // be consumed a single time.
       const errorBody = await response.text().catch(() => 'unknown error')
+
+      // Some local servers don't recognize stream_options.include_usage.
+      // Retry without it so streaming still works, just without token counts.
+      if (
+        response.status === 400 &&
+        errorBody.includes('stream_options') &&
+        body.stream_options
+      ) {
+        delete body.stream_options
+        refreshSerializedBody()
+        continue
+      }
 
       // Deleted per-message dump. Use errorBody dump below for 400 diagnosis.
 

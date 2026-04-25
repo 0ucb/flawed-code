@@ -129,3 +129,42 @@ export function isOutputLineTruncated(content: string): boolean {
   // renderTruncatedContent's trimEnd() behavior.
   return pos < content.length
 }
+
+const BINARY_DETECTION_SAMPLE = 4096
+
+export function isBinaryContent(content: string): boolean {
+  if (content.length === 0) return false
+  const sampleLen = Math.min(content.length, BINARY_DETECTION_SAMPLE)
+  let controlCount = 0
+  for (let i = 0; i < sampleLen; i++) {
+    const code = content.charCodeAt(i)
+    if (
+      code < 0x20 &&
+      code !== 0x09 &&
+      code !== 0x0a &&
+      code !== 0x0d &&
+      code !== 0x1b
+    ) {
+      controlCount++
+    } else if (code === 0x7f) {
+      controlCount++
+    } else if (code >= 0x80 && code <= 0x9f) {
+      controlCount++
+    }
+  }
+  return controlCount / sampleLen > 0.15
+}
+
+export function sanitizeBinaryOutput(
+  content: string,
+  byteLength: number = 0,
+): string {
+  if (!isBinaryContent(content)) return content
+  const size = byteLength || content.length
+  const sizeStr = size >= 1048576
+    ? `${(size / 1048576).toFixed(1)}MB`
+    : size >= 1024
+    ? `${(size / 1024).toFixed(1)}KB`
+    : `${size}B`
+  return `[binary output: ${sizeStr}]`
+}
