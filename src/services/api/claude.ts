@@ -1654,6 +1654,7 @@ async function* queryModel(
       isRedactThinkingActive: betasParams.includes(REDACT_THINKING_BETA_HEADER),
       clearAllThinking: thinkingClearLatched,
     })
+    if (thinkingClearLatched) setThinkingClearLatched(false)
 
     const enablePromptCaching =
       options.enablePromptCaching ?? getPromptCachingEnabled(retryContext.model)
