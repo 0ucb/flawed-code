@@ -207,6 +207,16 @@ async function getWatchablePaths(): Promise<string[]> {
     }
   }
 
+  // Project skills directory (.agents/skills)
+  const agentsSkillsPath = platformPath.join('.agents', 'skills')
+  try {
+    const absolutePath = platformPath.resolve(agentsSkillsPath)
+    await fs.stat(absolutePath)
+    paths.push(absolutePath)
+  } catch {
+    // Path doesn't exist, skip it
+  }
+
   // Project commands directory (.claude/commands)
   const projectCommandsPath = getSkillsPath('projectSettings', 'commands')
   if (projectCommandsPath) {

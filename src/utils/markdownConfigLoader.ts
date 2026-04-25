@@ -229,11 +229,14 @@ function resolveStopBoundary(cwd: string): string | null {
  *
  * @param subdir Subdirectory (eg. "commands", "agents")
  * @param cwd Current working directory to start from
- * @returns Array of directory paths containing .claude/subdir, from most specific (cwd) to least specific
+ * @param altParentDirs Optional additional parent directory names to search (e.g. ['.agents'])
+ *   at each level of the walk, checked after the primary .claude/<subdir> path.
+ * @returns Array of directory paths, from most specific (cwd) to least specific
  */
 export function getProjectDirsUpToHome(
   subdir: ClaudeConfigDirectory,
   cwd: string,
+  altParentDirs?: string[],
 ): string[] {
   const home = resolve(homedir()).normalize('NFC')
   const gitRoot = resolveStopBoundary(cwd)
@@ -262,6 +265,19 @@ export function getProjectDirsUpToHome(
       dirs.push(claudeSubdir)
     } catch (e: unknown) {
       if (!isFsInaccessible(e)) throw e
+    }
+
+    // Check alternative parent directories (e.g. .agents/skills/) at this level
+    if (altParentDirs) {
+      for (const altParent of altParentDirs) {
+        const altDir = join(current, altParent, subdir)
+        try {
+          statSync(altDir)
+          dirs.push(altDir)
+        } catch (e: unknown) {
+          if (!isFsInaccessible(e)) throw e
+        }
+      }
     }
 
     // Stop after processing the git root directory - this prevents commands from parent
