@@ -228,7 +228,6 @@ import {
 } from '../compact/microCompact.js'
 import { getInitializationStatus } from '../lsp/manager.js'
 import { isToolFromMcpServer } from '../mcp/utils.js'
-import { withStreamingVCR, withVCR } from '../vcr.js'
 import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from './client.js'
 import {
   API_ERROR_MESSAGE_PREFIX,
@@ -739,16 +738,14 @@ export async function queryModelWithoutStreaming({
   // Store the assistant message but continue consuming the generator to ensure
   // logAPISuccessAndDuration gets called (which happens after all yields)
   let assistantMessage: AssistantMessage | undefined
-  for await (const message of withStreamingVCR(messages, async function* () {
-    yield* queryModel(
-      messages,
-      systemPrompt,
-      thinkingConfig,
-      tools,
-      signal,
-      options,
-    )
-  })) {
+  for await (const message of queryModel(
+    messages,
+    systemPrompt,
+    thinkingConfig,
+    tools,
+    signal,
+    options,
+  )) {
     if (message.type === 'assistant') {
       assistantMessage = message
     }
@@ -782,16 +779,14 @@ export async function* queryModelWithStreaming({
   StreamEvent | AssistantMessage | SystemAPIErrorMessage,
   void
 > {
-  return yield* withStreamingVCR(messages, async function* () {
-    yield* queryModel(
-      messages,
-      systemPrompt,
-      thinkingConfig,
-      tools,
-      signal,
-      options,
-    )
-  })
+  return yield* queryModel(
+    messages,
+    systemPrompt,
+    thinkingConfig,
+    tools,
+    signal,
+    options,
+  )
 }
 
 /**
@@ -3278,43 +3273,30 @@ export async function queryHaiku({
   signal: AbortSignal
   options: HaikuOptions
 }): Promise<AssistantMessage> {
-  const result = await withVCR(
-    [
-      createUserMessage({
-        content: systemPrompt.map(text => ({ type: 'text', text })),
-      }),
-      createUserMessage({
-        content: userPrompt,
-      }),
-    ],
-    async () => {
-      const messages = [
-        createUserMessage({
-          content: userPrompt,
-        }),
-      ]
+  const messages = [
+    createUserMessage({
+      content: userPrompt,
+    }),
+  ]
 
-      const result = await queryModelWithoutStreaming({
-        messages,
-        systemPrompt,
-        thinkingConfig: { type: 'disabled' },
-        tools: [],
-        signal,
-        options: {
-          ...options,
-          model: getSmallFastModel(),
-          enablePromptCaching: options.enablePromptCaching ?? false,
-          outputFormat,
-          async getToolPermissionContext() {
-            return getEmptyToolPermissionContext()
-          },
-        },
-      })
-      return [result]
+  const result = await queryModelWithoutStreaming({
+    messages,
+    systemPrompt,
+    thinkingConfig: { type: 'disabled' },
+    tools: [],
+    signal,
+    options: {
+      ...options,
+      model: getSmallFastModel(),
+      enablePromptCaching: options.enablePromptCaching ?? false,
+      outputFormat,
+      async getToolPermissionContext() {
+        return getEmptyToolPermissionContext()
+      },
     },
-  )
+  })
   // We don't use streaming for Haiku so this is safe
-  return result[0]! as AssistantMessage
+  return result
 }
 
 type QueryWithModelOptions = Omit<Options, 'getToolPermissionContext'>
@@ -3337,41 +3319,28 @@ export async function queryWithModel({
   signal: AbortSignal
   options: QueryWithModelOptions
 }): Promise<AssistantMessage> {
-  const result = await withVCR(
-    [
-      createUserMessage({
-        content: systemPrompt.map(text => ({ type: 'text', text })),
-      }),
-      createUserMessage({
-        content: userPrompt,
-      }),
-    ],
-    async () => {
-      const messages = [
-        createUserMessage({
-          content: userPrompt,
-        }),
-      ]
+  const messages = [
+    createUserMessage({
+      content: userPrompt,
+    }),
+  ]
 
-      const result = await queryModelWithoutStreaming({
-        messages,
-        systemPrompt,
-        thinkingConfig: { type: 'disabled' },
-        tools: [],
-        signal,
-        options: {
-          ...options,
-          enablePromptCaching: options.enablePromptCaching ?? false,
-          outputFormat,
-          async getToolPermissionContext() {
-            return getEmptyToolPermissionContext()
-          },
-        },
-      })
-      return [result]
+  const result = await queryModelWithoutStreaming({
+    messages,
+    systemPrompt,
+    thinkingConfig: { type: 'disabled' },
+    tools: [],
+    signal,
+    options: {
+      ...options,
+      enablePromptCaching: options.enablePromptCaching ?? false,
+      outputFormat,
+      async getToolPermissionContext() {
+        return getEmptyToolPermissionContext()
+      },
     },
-  )
-  return result[0]! as AssistantMessage
+  })
+  return result
 }
 
 // Non-streaming requests have a 10min max per the docs:

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 
+import { isEnvTruthy } from '../envUtils.js'
 import { saveGlobalConfig } from '../config.js'
+import { resetSettingsCache, setCachedSettingsForSource } from '../settings/settingsCache.js'
 import {
   getDefaultHaikuModel,
   getDefaultOpusModel,
@@ -17,12 +19,17 @@ const SAVED_ENV = {
   CLAUDE_CODE_USE_BEDROCK: process.env.CLAUDE_CODE_USE_BEDROCK,
   CLAUDE_CODE_USE_VERTEX: process.env.CLAUDE_CODE_USE_VERTEX,
   CLAUDE_CODE_USE_FOUNDRY: process.env.CLAUDE_CODE_USE_FOUNDRY,
+  CLAUDE_CODE_USE_DEEPSEEK: process.env.CLAUDE_CODE_USE_DEEPSEEK,
+  DEEPSEEK_API_KEY: process.env.DEEPSEEK_API_KEY,
+  DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL,
+  DEEPSEEK_MODEL: process.env.DEEPSEEK_MODEL,
   NVIDIA_NIM: process.env.NVIDIA_NIM,
   MINIMAX_API_KEY: process.env.MINIMAX_API_KEY,
   OPENAI_MODEL: process.env.OPENAI_MODEL,
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
   CODEX_API_KEY: process.env.CODEX_API_KEY,
   CHATGPT_ACCOUNT_ID: process.env.CHATGPT_ACCOUNT_ID,
+  ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
 }
 
 function restoreEnv(key: keyof typeof SAVED_ENV): void {
@@ -36,9 +43,30 @@ function restoreEnv(key: keyof typeof SAVED_ENV): void {
 beforeEach(() => {
   // Other test files (notably modelOptions.github.test.ts) install a
   // persistent mock.module for './providers.js' that overrides getAPIProvider
-  // globally. Without mock.restore() here, those overrides bleed into this
-  // suite and the provider-kind branches we're testing become unreachable.
-  mock.restore()
+  // globally. mock.restore() does not undo mock.module, so we must
+  // re-mock to restore the real provider resolution.
+  mock.module('../model/providers.js', () => {
+    const { shouldUseCodexTransport } = require('../../services/api/providerConfig.js') as typeof import('../../services/api/providerConfig.js')
+    function computeProvider(): string {
+      if (isEnvTruthy(process.env.NVIDIA_NIM)) return 'nvidia-nim'
+      if (typeof process.env.MINIMAX_API_KEY === 'string' && process.env.MINIMAX_API_KEY.trim() !== '') return 'minimax'
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_GEMINI)) return 'gemini'
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_MISTRAL)) return 'mistral'
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_GITHUB)) return 'github'
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI)) {
+        const isCodex = shouldUseCodexTransport(
+          process.env.OPENAI_MODEL || '',
+          process.env.OPENAI_BASE_URL ?? process.env.OPENAI_API_BASE,
+        )
+        return isCodex ? 'codex' : 'openai'
+      }
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)) return 'bedrock'
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_VERTEX)) return 'vertex'
+      if (isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY)) return 'foundry'
+      return 'firstParty'
+    }
+    return { getAPIProvider: computeProvider }
+  })
   delete process.env.CLAUDE_CODE_USE_OPENAI
   delete process.env.CLAUDE_CODE_USE_GEMINI
   delete process.env.CLAUDE_CODE_USE_GITHUB
@@ -46,12 +74,19 @@ beforeEach(() => {
   delete process.env.CLAUDE_CODE_USE_BEDROCK
   delete process.env.CLAUDE_CODE_USE_VERTEX
   delete process.env.CLAUDE_CODE_USE_FOUNDRY
+  delete process.env.CLAUDE_CODE_USE_DEEPSEEK
+  delete process.env.DEEPSEEK_API_KEY
+  delete process.env.DEEPSEEK_BASE_URL
+  delete process.env.DEEPSEEK_MODEL
   delete process.env.NVIDIA_NIM
   delete process.env.MINIMAX_API_KEY
   delete process.env.OPENAI_MODEL
   delete process.env.OPENAI_BASE_URL
   delete process.env.CODEX_API_KEY
   delete process.env.CHATGPT_ACCOUNT_ID
+  delete process.env.ANTHROPIC_MODEL
+  resetSettingsCache()
+  setCachedSettingsForSource('userSettings', {})
   saveGlobalConfig(current => ({
     ...current,
     model: undefined,

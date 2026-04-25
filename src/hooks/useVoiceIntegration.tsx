@@ -13,25 +13,8 @@ import type { ParsedKeystroke } from '../keybindings/types.js';
 import { normalizeFullWidthSpace } from '../utils/stringUtils.js';
 import { useVoiceEnabled } from './useVoiceEnabled.js';
 
-// Dead code elimination: conditional import for voice input hook.
-/* eslint-disable @typescript-eslint/no-require-imports */
-// Capture the module namespace, not the function: spyOn() mutates the module
-// object, so `voiceNs.useVoice(...)` resolves to the spy even if this module
-// was loaded before the spy was installed (test ordering independence).
-const voiceNs: {
-  useVoice: typeof import('./useVoice.js').useVoice;
-} = feature('VOICE_MODE') ? require('./useVoice.js') : {
-  useVoice: ({
-    enabled: _e
-  }: {
-    onTranscript: (t: string) => void;
-    enabled: boolean;
-  }) => ({
-    state: 'idle' as const,
-    handleKeyEvent: (_fallbackMs?: number) => {}
-  })
-};
-/* eslint-enable @typescript-eslint/no-require-imports */
+// VOICE_MODE disabled — useVoice removed
+const useVoiceModule = {}
 
 // Maximum gap (ms) between key presses to count as held (auto-repeat).
 // Terminal auto-repeat fires every 30-80ms; 120ms covers jitter while
@@ -308,20 +291,10 @@ export function useVoiceIntegration({
     // appending subsequent transcripts after it.
     voicePrefixRef.current = prefix_1 + leadingSpace_0 + text;
   }, [setInputValueRaw, inputValueRef, insertTextRef]);
-  const voice = voiceNs.useVoice({
-    onTranscript: handleVoiceTranscript,
-    onError: (message: string) => {
-      addNotification({
-        key: 'voice-error',
-        text: message,
-        color: 'error',
-        priority: 'immediate',
-        timeoutMs: 10_000
-      });
-    },
-    enabled: voiceEnabled,
-    focusMode: false
-  });
+  const voice = {
+    state: 'idle' as const,
+    handleKeyEvent: (_fallbackMs?: number) => {}
+  }
 
   // Compute the character range of interim (not-yet-finalized) transcript
   // text in the input value, so the UI can dim it.

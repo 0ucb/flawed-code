@@ -910,6 +910,7 @@ export async function applySavedProfileToCurrentSession(options: {
 
   delete baseEnv.CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED
   delete baseEnv.CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED_ID
+
   if (isCodexOAuthProfile) {
     delete baseEnv.CODEX_API_KEY
     delete baseEnv.CODEX_ACCOUNT_ID

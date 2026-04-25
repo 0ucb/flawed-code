@@ -1,5 +1,5 @@
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { roughTokenCountEstimation, roughTokenCountEstimationForMessages } from '../services/tokenEstimation.js'
+import { roughTokenCountEstimation, roughTokenCountEstimationForMessages, roughTokenCountEstimationForModel } from '../services/tokenEstimation.js'
 import type { AssistantMessage, Message } from '../types/message.js'
 import { SYNTHETIC_MESSAGES, SYNTHETIC_MODEL } from './messages.js'
 import { jsonStringify } from './slowOperations.js'
@@ -208,15 +208,16 @@ export function extractThinkingTokens(
   let thinking = 0
   let output = 0
 
+  const model = message.message.model
   for (const block of message.message.content) {
     if (block.type === 'thinking') {
-      thinking += roughTokenCountEstimation(block.thinking)
+      thinking += roughTokenCountEstimationForModel(block.thinking, model)
     } else if (block.type === 'redacted_thinking') {
-      thinking += roughTokenCountEstimation(block.data)
+      thinking += roughTokenCountEstimationForModel(block.data, model)
     } else if (block.type === 'text') {
-      output += roughTokenCountEstimation(block.text)
+      output += roughTokenCountEstimationForModel(block.text, model)
     } else if (block.type === 'tool_use') {
-      output += roughTokenCountEstimation(jsonStringify(block.input))
+      output += roughTokenCountEstimationForModel(jsonStringify(block.input), model)
     }
   }
 

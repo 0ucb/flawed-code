@@ -25,7 +25,6 @@ import { jsonStringify } from '../utils/slowOperations.js'
 import { isToolReferenceBlock } from '../utils/toolSearch.js'
 import { getAPIMetadata, getExtraBodyParams } from './api/claude.js'
 import { getAnthropicClient } from './api/client.js'
-import { withTokenCountVCR } from './vcr.js'
 
 // Minimal values for token counting with thinking enabled
 // API constraint: max_tokens must be greater than thinking.budget_tokens
@@ -141,63 +140,61 @@ export async function countMessagesTokensWithAPI(
   messages: Anthropic.Beta.Messages.BetaMessageParam[],
   tools: Anthropic.Beta.Messages.BetaToolUnion[],
 ): Promise<number | null> {
-  return withTokenCountVCR(messages, tools, async () => {
-    try {
-      const model = getMainLoopModel()
-      const betas = getModelBetas(model)
-      const containsThinking = hasThinkingBlocks(messages)
+  try {
+    const model = getMainLoopModel()
+    const betas = getModelBetas(model)
+    const containsThinking = hasThinkingBlocks(messages)
 
-      if (getAPIProvider() === 'bedrock') {
-        // @anthropic-sdk/bedrock-sdk doesn't support countTokens currently
-        return countTokensWithBedrock({
-          model: normalizeModelStringForAPI(model),
-          messages,
-          tools,
-          betas,
-          containsThinking,
-        })
-      }
-
-      const anthropic = await getAnthropicClient({
-        maxRetries: 1,
-        model,
-        source: 'count_tokens',
-      })
-
-      const filteredBetas =
-        getAPIProvider() === 'vertex'
-          ? betas.filter(b => VERTEX_COUNT_TOKENS_ALLOWED_BETAS.has(b))
-          : betas
-
-      const response = await anthropic.beta.messages.countTokens({
+    if (getAPIProvider() === 'bedrock') {
+      // @anthropic-sdk/bedrock-sdk doesn't support countTokens currently
+      return countTokensWithBedrock({
         model: normalizeModelStringForAPI(model),
-        messages:
-          // When we pass tools and no messages, we need to pass a dummy message
-          // to get an accurate tool token count.
-          messages.length > 0 ? messages : [{ role: 'user', content: 'foo' }],
+        messages,
         tools,
-        ...(filteredBetas.length > 0 && { betas: filteredBetas }),
-        // Enable thinking if messages contain thinking blocks
-        ...(containsThinking && {
-          thinking: {
-            type: 'enabled',
-            budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
-          },
-        }),
+        betas,
+        containsThinking,
       })
+    }
 
-      if (typeof response.input_tokens !== 'number') {
-        // Vertex client throws
-        // Bedrock client succeeds with { Output: { __type: 'com.amazon.coral.service#UnknownOperationException' }, Version: '1.0' }
-        return null
-      }
+    const anthropic = await getAnthropicClient({
+      maxRetries: 1,
+      model,
+      source: 'count_tokens',
+    })
 
-      return response.input_tokens
-    } catch (error) {
-      logError(error)
+    const filteredBetas =
+      getAPIProvider() === 'vertex'
+        ? betas.filter(b => VERTEX_COUNT_TOKENS_ALLOWED_BETAS.has(b))
+        : betas
+
+    const response = await anthropic.beta.messages.countTokens({
+      model: normalizeModelStringForAPI(model),
+      messages:
+        // When we pass tools and no messages, we need to pass a dummy message
+        // to get an accurate tool token count.
+        messages.length > 0 ? messages : [{ role: 'user', content: 'foo' }],
+      tools,
+      ...(filteredBetas.length > 0 && { betas: filteredBetas }),
+      // Enable thinking if messages contain thinking blocks
+      ...(containsThinking && {
+        thinking: {
+          type: 'enabled',
+          budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
+        },
+      }),
+    })
+
+    if (typeof response.input_tokens !== 'number') {
+      // Vertex client throws
+      // Bedrock client succeeds with { Output: { __type: 'com.amazon.coral.service#UnknownOperationException' }, Version: '1.0' }
       return null
     }
-  })
+
+    return response.input_tokens
+  } catch (error) {
+    logError(error)
+    return null
+  }
 }
 
 export function roughTokenCountEstimation(
@@ -205,6 +202,27 @@ export function roughTokenCountEstimation(
   bytesPerToken: number = 4,
 ): number {
   return Math.round(content.length / bytesPerToken)
+}
+
+const MODEL_BYTES_PER_TOKEN: Record<string, number> = {
+  qwen: 2.0,
+  deepseek: 3.0,
+  llama: 2.5,
+  mistral: 3.0,
+  gemma: 2.5,
+  minimax: 3.5,
+}
+
+export function roughTokenCountEstimationForModel(
+  content: string,
+  model: string | undefined,
+): number {
+  if (!model) return roughTokenCountEstimation(content)
+  const lower = model.toLowerCase()
+  for (const [key, ratio] of Object.entries(MODEL_BYTES_PER_TOKEN)) {
+    if (lower.includes(key)) return roughTokenCountEstimation(content, ratio)
+  }
+  return roughTokenCountEstimation(content)
 }
 
 /**
